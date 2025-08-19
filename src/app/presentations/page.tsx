@@ -227,7 +227,7 @@ export default function PresentationsPage() {
                         asChild
                       >
                         <Link 
-                          href={`/editor?content=${encodeURIComponent(presentation.content)}`}
+                          href={`/editor?id=${presentation.id}`}
                           className="flex items-center gap-2"
                         >
                           <Edit className="w-3 h-3" />

@@ -46,6 +46,14 @@ export function PresentationViewer({ presentation, aiEnhancedPresentation, useAI
     setCurrentSlideIndex(Math.max(0, Math.min(index, slideCount - 1)));
   }, [slideCount]);
 
+  // Reset slide index when switching between AI and markdown slides
+  useEffect(() => {
+    setCurrentSlideIndex(0);
+    // UNCOMMENT LINES BELOW TO ENABLE DEBUGGING
+    // console.log('🔄 Switched slide mode:', useAISlides ? 'AI Slides' : 'Markdown Slides');
+    // console.log('📊 Active slide count:', slideCount);
+  }, [useAISlides]);
+
   // Keyboard navigation
   useEffect(() => {
     if (typeof window === 'undefined') return;

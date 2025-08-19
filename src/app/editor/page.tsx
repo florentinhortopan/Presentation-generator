@@ -45,6 +45,41 @@ import { Navigation } from '@/components/layout/Navigation';
 import { processURLParameter } from '@/lib/url-utils';
 import { cn } from '@/lib/utils';
 
+// ========================================
+// DEBUG CONFIGURATION
+// ========================================
+// Set DEBUG_ENABLED to true to enable comprehensive console debugging throughout the editor
+// This will log:
+// - AI slide generation process
+// - Presentation loading from storage
+// - State changes for AI slides
+// - Toggle button interactions
+// - Slide mode switching
+//
+// To enable debugging: Change DEBUG_ENABLED to true
+// To disable debugging: Change DEBUG_ENABLED to false
+const DEBUG_ENABLED = false;
+
+// Helper function to conditionally log debug messages
+const debugLog = (...args: any[]) => {
+  if (DEBUG_ENABLED) {
+    console.log(...args);
+  }
+};
+
+const debugWarn = (...args: any[]) => {
+  if (DEBUG_ENABLED) {
+    console.warn(...args);
+  }
+};
+
+const debugError = (...args: any[]) => {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+};
+// ========================================
+
 const defaultPRD = `---
 title: "My AI-Powered Presentation"
 author: "Your Name"
@@ -183,24 +218,55 @@ function EditorContent() {
     return () => clearTimeout(timeoutId);
   }, [content, validateAndParse]);
 
-  // Load content from URL parameter
+  // Load content from URL parameter or presentation ID
   useEffect(() => {
-    const urlContent = searchParams.get('content');
-    if (urlContent) {
-      try {
-        const decoded = processURLParameter(urlContent);
-        
-        if (decoded) {
-          setContent(decoded);
-          setHasUnsavedChanges(true);
-        } else {
-          console.warn('Failed to process URL content parameter, using default content');
+    const loadFromUrl = async () => {
+      const presentationId = searchParams.get('id');
+      const urlContent = searchParams.get('content');
+      
+      // Priority: ID > Content parameter
+      if (presentationId) {
+        try {
+          debugLog('🔄 Loading presentation from ID:', presentationId);
+          const stored = await presentationStorage.getPresentation(presentationId);
+          if (stored) {
+            debugLog('✅ Loaded presentation:', stored);
+            setContent(stored.content);
+            setPresentation(stored.presentation);
+            
+            // Load AI slides if they exist
+            if (stored.aiEnhancedPresentation) {
+              debugLog('🤖 Loading AI slides:', stored.aiEnhancedPresentation);
+              setAiGeneratedSlides(stored.aiEnhancedPresentation);
+              setUseAISlides(stored.useAISlides || false);
+              debugLog('✅ AI slides loaded, useAISlides:', stored.useAISlides);
+            }
+            
+            setHasUnsavedChanges(false); // This is a saved presentation
+          } else {
+            debugWarn('Presentation not found with ID:', presentationId);
+          }
+        } catch (error) {
+          debugError('Error loading presentation from ID:', error);
         }
-      } catch (error) {
-        console.error('Error loading content from URL:', error);
-        // Silently use default content - don't show error to user
+      } else if (urlContent) {
+        try {
+          const decoded = processURLParameter(urlContent);
+          
+          if (decoded) {
+            setContent(decoded);
+            setHasUnsavedChanges(true);
+          } else {
+            debugWarn('Failed to process URL content parameter, using default content');
+          }
+        } catch (error) {
+          debugError('Error loading content from URL:', error);
+          // Silently use default content - don't show error to user
+        }
       }
-    }
+    };
+    
+    loadFromUrl();
   }, [searchParams]);
 
   // Check for API key
@@ -212,6 +278,15 @@ function EditorContent() {
   useEffect(() => {
     validateAndParse(content);
   }, []);
+
+  // Debug AI slides state changes
+  useEffect(() => {
+    debugLog('🔄 aiGeneratedSlides state changed:', aiGeneratedSlides);
+    if (aiGeneratedSlides) {
+      debugLog('📊 AI slides count:', aiGeneratedSlides.htmlSlides?.length || 0);
+      debugLog('🔍 AI slides structure:', Object.keys(aiGeneratedSlides));
+    }
+  }, [aiGeneratedSlides]);
 
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
@@ -241,7 +316,7 @@ function EditorContent() {
       setContent(fileContent);
       setHasUnsavedChanges(true);
     } catch (error) {
-      console.error('Error reading file:', error);
+      debugError('Error reading file:', error);
     }
   };
 
@@ -281,7 +356,7 @@ function EditorContent() {
       await navigator.clipboard.writeText(url);
       alert(`Shareable URL copied to clipboard!\nShort URL: ${url}`);
     } catch (err) {
-      console.error('Failed to create shareable URL:', err);
+      debugError('Failed to create shareable URL:', err);
       alert('Failed to create shareable URL. Please try again.');
     }
   };
@@ -298,7 +373,7 @@ function EditorContent() {
       setPresentation(enhanced);
       alert('Presentation enhanced with AI! Check the preview to see improvements.');
     } catch (error) {
-      console.error('AI enhancement failed:', error);
+      debugError('AI enhancement failed:', error);
       alert('AI enhancement failed. Please check your API key and try again.');
     } finally {
       setIsEnhancing(false);
@@ -313,19 +388,28 @@ function EditorContent() {
 
     setIsGeneratingHTML(true);
     try {
-      console.log('🤖 Starting AI HTML generation...');
+      debugLog('🤖 Starting AI HTML generation...');
       const result = await prdParser.parseMarkdownWithAI(content);
       
       if (result.aiEnhanced) {
+        debugLog('✅ AI HTML slides generated:', result.aiEnhanced);
+        debugLog('📊 Number of slides generated:', result.aiEnhanced.htmlSlides.length);
+        debugLog('🔍 First slide preview:', result.aiEnhanced.htmlSlides[0]);
+        
+        // Set state with detailed logging
+        debugLog('🔄 Setting aiGeneratedSlides state...');
         setAiGeneratedSlides(result.aiEnhanced);
-        setUseAISlides(true); // Automatically switch to AI slides when generated
-        console.log('✅ AI HTML slides generated:', result.aiEnhanced);
+        
+        debugLog('🔄 Setting useAISlides to true...');
+        setUseAISlides(true);
+        
+        debugLog('✅ State updates complete');
         alert(`Successfully generated ${result.aiEnhanced.htmlSlides.length} AI-powered HTML slides! View switched to AI slides.`);
       } else {
         throw new Error('No AI-enhanced content was generated');
       }
     } catch (error) {
-      console.error('❌ AI HTML generation failed:', error);
+      debugError('❌ AI HTML generation failed:', error);
       alert(`AI HTML generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsGeneratingHTML(false);
@@ -350,6 +434,8 @@ function EditorContent() {
               </Badge>
             )}
           </div>
+          
+
           
           {/* Validation Status */}
           <div className="flex items-center gap-2">
@@ -377,30 +463,53 @@ function EditorContent() {
             )}
           </div>
           
-          {/* Slide type toggle */}
-          {aiGeneratedSlides && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-slate-300">View:</span>
-              <Button
-                variant={useAISlides ? "default" : "outline"}
-                size="sm"
-                onClick={() => setUseAISlides(true)}
-                className="text-xs"
-              >
-                <Sparkles className="w-3 h-3 mr-1" />
-                AI Slides
-              </Button>
-              <Button
-                variant={!useAISlides ? "default" : "outline"}
-                size="sm"
-                onClick={() => setUseAISlides(false)}
-                className="text-xs"
-              >
-                <FileText className="w-3 h-3 mr-1" />
-                Markdown
-              </Button>
+
+
+          {/* Slide type toggle - More prominent */}
+          {aiGeneratedSlides && aiGeneratedSlides.htmlSlides && aiGeneratedSlides.htmlSlides.length > 0 ? (
+            <div className="flex items-center gap-3 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700">
+              <span className="text-sm font-medium text-slate-200">View Mode:</span>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant={useAISlides ? "default" : "outline"}
+                  size="sm"
+                                  onClick={() => {
+                  debugLog('🔄 Switching to AI slides');
+                  setUseAISlides(true);
+                }}
+                  className={cn(
+                    "text-xs transition-all",
+                    useAISlides 
+                      ? "bg-gradient-to-r from-cyan-600 to-pink-600 hover:from-cyan-700 hover:to-pink-700" 
+                      : ""
+                  )}
+                >
+                  <Sparkles className="w-3 h-3 mr-1" />
+                  AI Slides
+                </Button>
+                <Button
+                  variant={!useAISlides ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    debugLog('🔄 Switching to Markdown slides');
+                    setUseAISlides(false);
+                  }}
+                  className="text-xs"
+                >
+                  <FileText className="w-3 h-3 mr-1" />
+                  Markdown
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-yellow-400 px-2 py-1 bg-yellow-900/20 rounded">
+              {aiGeneratedSlides ? 'AI slides structure invalid' : 'No AI slides generated yet'}
             </div>
           )}
+          
+
+          
+
         </div>
 
         {/* Actions */}
@@ -508,7 +617,7 @@ function EditorContent() {
                   );
                   window.open(`/present?id=${presentationId}`, '_blank');
                 } catch (err) {
-                  console.error('Failed to save presentation:', err);
+                  debugError('Failed to save presentation:', err);
                   // Fallback to legacy method
                   window.open(`/present?prd=${encodeURIComponent(content)}`, '_blank');
                 }
@@ -563,10 +672,29 @@ function EditorContent() {
               <Panel defaultSize={50} minSize={30}>
                 <div className="h-full flex flex-col">
                   <div className="p-4 border-b border-slate-800 bg-slate-900/30">
-                    <h3 className="font-medium">Live Preview</h3>
-                    <p className="text-sm text-slate-200">
-                      See your presentation in real-time
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium">Live Preview</h3>
+                        <p className="text-sm text-slate-200">
+                          {useAISlides && aiGeneratedSlides ? 'Showing AI-generated slides' : 'See your presentation in real-time'}
+                        </p>
+                      </div>
+                      {aiGeneratedSlides && (
+                        <div className="flex items-center gap-1 text-xs">
+                          {useAISlides ? (
+                            <div className="flex items-center gap-1 text-cyan-400">
+                              <Sparkles className="w-3 h-3" />
+                              <span>AI Mode</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 text-slate-400">
+                              <FileText className="w-3 h-3" />
+                              <span>Markdown Mode</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="flex-1 bg-slate-950">
                     {validationError ? (

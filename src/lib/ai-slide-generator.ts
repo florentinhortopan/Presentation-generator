@@ -114,6 +114,7 @@ SPECIAL INSTRUCTIONS:
 - For ASCII diagrams, use Unicode box-drawing characters (┌┐└┘├┤┬┴┼│─)
 - Maintain the presentation's tone and voice
 - Consider slide position in overall flow
+- Make sure text colors and backgrounds are contrasty and readable
 
 Respond with JSON:
 {
