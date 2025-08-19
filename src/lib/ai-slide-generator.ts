@@ -115,6 +115,7 @@ SPECIAL INSTRUCTIONS:
 - Maintain the presentation's tone and voice
 - Consider slide position in overall flow
 - Make sure text colors and backgrounds are contrasty and readable
+- Generate responsive and adaptive code so slides look good on mobile and desktop
 
 Respond with JSON:
 {

@@ -583,7 +583,7 @@ function EditorContent() {
               ) : (
                 <Sparkles className="w-4 h-4 mr-2" />
               )}
-              {isEnhancing ? 'Enhancing...' : 'AI Enhance'}
+              {isEnhancing ? 'Enhancing...' : 'AI Enhance (Basic)'}
             </Button>
           )}
 
@@ -592,14 +592,19 @@ function EditorContent() {
               size="sm"
               onClick={handleAIGenerateHTML}
               disabled={isGeneratingHTML}
-              className="bg-gradient-to-r from-cyan-600 to-pink-600 hover:from-cyan-700 hover:to-pink-700"
+              className="bg-gradient-to-r from-cyan-600 to-pink-600 hover:from-cyan-700 hover:to-pink-700 relative"
             >
               {isGeneratingHTML ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
               ) : (
                 <Sparkles className="w-4 h-4 mr-2" />
               )}
-              {isGeneratingHTML ? 'Generating HTML...' : 'AI Generate HTML'}
+              {isGeneratingHTML ? 'Generating Slides...' : 'AI Generate Slides'}
+              {!isGeneratingHTML && (
+                <span className="absolute -top-1 -right-1 bg-yellow-400 text-black text-xs px-1 rounded font-bold">
+                  NEW
+                </span>
+              )}
             </Button>
           )}
 
