@@ -184,32 +184,11 @@ function EditorContent() {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  
-  const [isModifyingPRD, setIsModifyingPRD] = useState(false);
-  const [modificationDescription, setModificationDescription] = useState('');
-  const [modificationHistory, setModificationHistory] = useState<Array<{description: string; timestamp: Date}>>([]);
-  
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-  
-  const modificationTextareaRef = React.useRef<HTMLTextAreaElement>(null);
-
-  // Focus the textarea when the component mounts
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
-  }, []);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(false);
   const [isGeneratingHTML, setIsGeneratingHTML] = useState(false);
   const [aiGeneratedSlides, setAiGeneratedSlides] = useState<any>(null);
   const [useAISlides, setUseAISlides] = useState(false);
-  
-  // Layout guidance and image upload state
-  const [layoutGuidance, setLayoutGuidance] = useState('');
-  const [selectedLayout, setSelectedLayout] = useState('auto');
-  const [uploadedImages, setUploadedImages] = useState<Array<{id: number; name: string; url: string; size: number}>>([]);
-  const [imageUploadRef, setImageUploadRef] = useState<HTMLInputElement | null>(null);
 
   // Parse and validate PRD
   const validateAndParse = useCallback(async (prdContent: string) => {
@@ -401,51 +380,31 @@ function EditorContent() {
     }
   };
 
-
   const handleAIGenerateHTML = async () => {
     if (!hasApiKey) {
-      alert('OpenAI API key not configured. Please add NEXT_PUBLIC_OPENAI_API_KEY to your environment variables.');
-      return;
-    }
-
-    if (!presentation) {
-      alert('Please ensure the PRD is valid before generating AI slides.');
+      alert('OpenAI API key is required for HTML generation.');
       return;
     }
 
     setIsGeneratingHTML(true);
-    
     try {
-      debugLog('🚀 Starting AI HTML generation with layout guidance...');
-      debugLog('📝 Content length:', content.length);
-      debugLog('📐 Selected layout:', selectedLayout);
-      debugLog('💡 Layout guidance:', layoutGuidance);
-      debugLog('🖼️ Uploaded images:', uploadedImages.length);
+      debugLog('🤖 Starting AI HTML generation...');
+      const result = await prdParser.parseMarkdownWithAI(content);
       
-      // Use the new method with layout guidance and images
-      const result = await aiSlideGeneratorV2.generateStructurePreservingSlidesWithGuidance(
-        content,
-        layoutGuidance,
-        selectedLayout,
-        uploadedImages
-      );
-      
-      debugLog('✅ AI HTML generation result:', result);
-      
-      if (result && result.htmlSlides && result.htmlSlides.length > 0) {
-        debugLog('✅ AI HTML slides generated:', result);
-        debugLog('📊 Number of slides generated:', result.htmlSlides.length);
-        debugLog('🔍 First slide preview:', result.htmlSlides[0]);
+      if (result.aiEnhanced) {
+        debugLog('✅ AI HTML slides generated:', result.aiEnhanced);
+        debugLog('📊 Number of slides generated:', result.aiEnhanced.htmlSlides.length);
+        debugLog('🔍 First slide preview:', result.aiEnhanced.htmlSlides[0]);
         
         // Set state with detailed logging
         debugLog('🔄 Setting aiGeneratedSlides state...');
-        setAiGeneratedSlides(result);
+        setAiGeneratedSlides(result.aiEnhanced);
         
         debugLog('🔄 Setting useAISlides to true...');
         setUseAISlides(true);
         
         debugLog('✅ State updates complete');
-        alert(`Successfully generated ${result.htmlSlides.length} AI-powered HTML slides with layout guidance! View switched to AI slides.`);
+        alert(`Successfully generated ${result.aiEnhanced.htmlSlides.length} AI-powered HTML slides! View switched to AI slides.`);
       } else {
         throw new Error('No AI-enhanced content was generated');
       }
@@ -457,179 +416,12 @@ function EditorContent() {
     }
   };
 
-  
-  const handlePRDModification = async () => {
-    if (!modificationDescription.trim()) {
-      alert('Please describe the changes you want to make to the PRD.');
-      return;
-    }
-
-    if (!hasApiKey) {
-      alert('OpenAI API key is required for PRD modification. Please add your API key to the environment variables.');
-      return;
-    }
-
-    setIsModifyingPRD(true);
-    
-    try {
-      console.log('🤖 Modifying PRD with description:', modificationDescription);
-      
-      // Call AI to modify the PRD
-      const modifiedContent = await aiSlideGeneratorV2.modifyPRD(content, modificationDescription);
-      
-      // Update the content with the modified PRD
-      setContent(modifiedContent);
-      setHasUnsavedChanges(true);
-      
-      // 🚀 IMPORTANT: Re-parse the modified PRD to update presentation state
-      console.log('🔄 Re-parsing modified PRD...');
-      const parsedResult = await prdParser.parseMarkdown(modifiedContent, false);
-      setPresentation(parsedResult);
-      
-      // Clear any existing AI slides since the PRD changed
-      setAiGeneratedSlides(null);
-      setUseAISlides(false);
-      
-      // Add to modification history
-      setModificationHistory(prev => [...prev, {
-        description: modificationDescription,
-        timestamp: new Date()
-      }]);
-      
-      // Clear the modification description
-      setModificationDescription('');
-      
-      alert('PRD successfully modified! The content has been updated with your requested changes. You can now generate new AI slides from the modified PRD.');
-      
-    } catch (error) {
-      console.error('❌ PRD modification failed:', error);
-      alert(`PRD modification failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setIsModifyingPRD(false);
-    }
-  };
-
-  
-  // Image upload and layout guidance functions
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    const imagePromises = files.map(file => {
-      return new Promise<{id: number; name: string; url: string; size: number}>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          resolve({
-            id: Date.now() + Math.random(),
-            name: file.name,
-            url: e.target?.result as string,
-            size: file.size
-          });
-        };
-        reader.readAsDataURL(file);
-      });
-    });
-
-    Promise.all(imagePromises).then(images => {
-      setUploadedImages(prev => [...prev, ...images]);
-    });
-  };
-
-  const removeImage = (imageId: number) => {
-    setUploadedImages(prev => prev.filter(img => img.id !== imageId));
-  };
-
-  const getLayoutGuidanceText = () => {
-    let guidance = '';
-    
-    if (selectedLayout !== 'auto') {
-      guidance += `Layout: ${selectedLayout}\n`;
-    }
-    
-    if (layoutGuidance.trim()) {
-      guidance += `Custom guidance: ${layoutGuidance}\n`;
-    }
-    
-    if (uploadedImages.length > 0) {
-      guidance += `Images to include: ${uploadedImages.map(img => img.name).join(', ')}\n`;
-    }
-    
-    return guidance;
-  };
-
   const presentationCount = presentation?.slides.length || 0;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
       <Navigation />
       <div className="flex-1 flex flex-col">
-        
-        {/* PRD Modification Section */}
-        <div className="p-4 bg-slate-900/30 border-b border-slate-800">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles className="w-4 h-4 text-purple-400" />
-            <h3 className="text-sm font-medium text-purple-400">AI PRD Modification</h3>
-          </div>
-          
-          <div className="flex gap-2">
-
-            <Textarea
-              ref={modificationTextareaRef}
-              placeholder="Describe the changes you want to make to the PRD (e.g., 'Add a slide about pricing', 'Make the tone more casual', 'Add technical specifications')"
-              value={modificationDescription}
-              onChange={(e) => setModificationDescription(e.target.value)}
-              className="flex-1 min-h-[60px] bg-slate-800 border-slate-700 text-slate-100 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-              disabled={isModifyingPRD}
-              onFocus={(e) => {
-                // Ensure the textarea gets focus and prevents event bubbling
-                e.target.focus();
-                e.stopPropagation();
-              }}
-              onKeyDown={(e) => {
-                // Prevent keyboard events from bubbling to parent elements
-                e.stopPropagation();
-              }}
-              onMouseDown={(e) => {
-                // Prevent mouse events from interfering with focus
-                e.stopPropagation();
-              }}
-              onBlur={(e) => {
-                // Prevent blur events from bubbling
-                e.stopPropagation();
-              }}
-            />
-            <Button
-              onClick={handlePRDModification}
-              disabled={isModifyingPRD || !modificationDescription.trim() || !hasApiKey}
-              className="bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700"
-            >
-              {isModifyingPRD ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Modifying...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  Modify PRD
-                </>
-              )}
-            </Button>
-          </div>
-          
-          {/* Modification History */}
-          {modificationHistory.length > 0 && (
-            <div className="mt-3">
-              <h4 className="text-xs font-medium text-slate-400 mb-2">Recent Modifications:</h4>
-              <div className="space-y-1 max-h-20 overflow-y-auto">
-                {modificationHistory.slice(-3).map((mod, index) => (
-                  <div key={index} className="text-xs text-slate-500 bg-slate-800/50 p-2 rounded">
-                    <div className="font-medium">{mod.description}</div>
-                    <div className="text-slate-600">{mod.timestamp.toLocaleTimeString()}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
       {/* Top Bar */}
       <div className="flex items-center justify-between p-4 bg-slate-900/50 border-b border-slate-800">
         <div className="flex items-center gap-4">
@@ -869,26 +661,11 @@ function EditorContent() {
                     </p>
                   </div>
                   <div className="flex-1 p-4">
-
                     <Textarea
-                      ref={textareaRef}
                       value={content}
                       onChange={(e) => handleContentChange(e.target.value)}
-                      className="w-full h-full resize-none font-mono text-sm bg-slate-950 border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full h-full resize-none font-mono text-sm bg-slate-950 border-slate-700"
                       placeholder="Enter your PRD content..."
-                      onFocus={(e) => {
-                        // Ensure the textarea gets focus and prevents event bubbling
-                        e.target.focus();
-                        e.stopPropagation();
-                      }}
-                      onKeyDown={(e) => {
-                        // Prevent keyboard events from bubbling to parent elements
-                        e.stopPropagation();
-                      }}
-                      onMouseDown={(e) => {
-                        // Prevent mouse events from interfering with focus
-                        e.stopPropagation();
-                      }}
                     />
                   </div>
                 </div>

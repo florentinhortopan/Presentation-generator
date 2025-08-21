@@ -59,7 +59,7 @@ export default function AITestPage() {
 
     try {
       console.log('🤖 Testing AI slide generation...');
-      const generated = await aiSlideGeneratorV2.generateEnhancedPresentation(prdContent);
+      const generated = await aiSlideGeneratorV2.generateEnhancedPresentationChunked(prdContent);
       setResult(generated);
       console.log('✅ AI generation successful:', generated);
     } catch (err) {
@@ -294,6 +294,28 @@ export default function AITestPage() {
                   <AISlideRenderer
                     slide={(result || simpleResult).htmlSlides[currentSlideIndex]}
                     isFullscreen={false}
+                    theme={{
+                      primaryColor: '#00E0FF',
+                      secondaryColor: '#FF00AA',
+                      backgroundColor: 'hsl(224, 71%, 4%)',
+                      textColor: 'hsl(210, 40%, 98%)',
+                      accentColor: 'hsl(217, 91%, 60%)',
+                      fontFamily: 'Inter, system-ui, sans-serif',
+                      fontSize: {
+                        title: '3rem',
+                        subtitle: '1.5rem',
+                        body: '1.125rem',
+                        caption: '0.875rem',
+                      },
+                      spacing: {
+                        section: '2rem',
+                        paragraph: '1rem',
+                      },
+                      animation: {
+                        duration: 0.6,
+                        easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+                      },
+                    }}
                   />
                 </div>
               ) : (

@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
@@ -24,7 +24,6 @@ import {
   Download, 
   Upload, 
   Eye, 
-  Code, 
   FileText,
   CheckCircle,
   AlertCircle,
@@ -185,31 +184,18 @@ function EditorContent() {
   const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+
   const [isModifyingPRD, setIsModifyingPRD] = useState(false);
   const [modificationDescription, setModificationDescription] = useState('');
-  const [modificationHistory, setModificationHistory] = useState<Array<{description: string; timestamp: Date}>>([]);
-  
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-  
-  const modificationTextareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const [modificationHistory, setModificationHistory] = useState<Array<{description: string, timestamp: Date}>>([]);
 
-  // Focus the textarea when the component mounts
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.focus();
-    }
-  }, []);
-  const [isEnhancing, setIsEnhancing] = useState(false);
+
   const [hasApiKey, setHasApiKey] = useState(false);
   const [isGeneratingHTML, setIsGeneratingHTML] = useState(false);
   const [aiGeneratedSlides, setAiGeneratedSlides] = useState<any>(null);
   const [useAISlides, setUseAISlides] = useState(false);
-  
-  // Layout guidance and image upload state
-  const [layoutGuidance, setLayoutGuidance] = useState('');
-  const [selectedLayout, setSelectedLayout] = useState('auto');
-  const [uploadedImages, setUploadedImages] = useState<Array<{id: number; name: string; url: string; size: number}>>([]);
-  const [imageUploadRef, setImageUploadRef] = useState<HTMLInputElement | null>(null);
 
   // Parse and validate PRD
   const validateAndParse = useCallback(async (prdContent: string) => {
@@ -292,7 +278,12 @@ function EditorContent() {
 
   // Check for API key
   useEffect(() => {
-    setHasApiKey(!!process.env.NEXT_PUBLIC_OPENAI_API_KEY);
+    const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+    console.log('🔑 API Key check:');
+    console.log('  - API key exists:', !!apiKey);
+    console.log('  - API key length:', apiKey?.length || 0);
+    console.log('  - API key first 10 chars:', apiKey?.substring(0, 10) || 'none');
+    setHasApiKey(!!apiKey);
   }, []);
 
   // Initial parse
@@ -367,11 +358,11 @@ function EditorContent() {
     try {
       // Save presentation and get short ID
       const presentationId = await presentationStorage.savePresentation(
-        content, 
-        presentation, 
-        aiGeneratedSlides, 
-        useAISlides
-      );
+                    content, 
+                    presentation || null, 
+                    aiGeneratedSlides, 
+                    useAISlides
+                  );
       const url = `${window.location.origin}/present?id=${presentationId}`;
       
       await navigator.clipboard.writeText(url);
@@ -382,24 +373,7 @@ function EditorContent() {
     }
   };
 
-  const handleAIEnhancement = async () => {
-    if (!hasApiKey) {
-      alert('OpenAI API key not configured. Please add NEXT_PUBLIC_OPENAI_API_KEY to your environment variables.');
-      return;
-    }
 
-    setIsEnhancing(true);
-    try {
-      const enhanced = await prdParser.parseMarkdown(content, true);
-      setPresentation(enhanced);
-      alert('Presentation enhanced with AI! Check the preview to see improvements.');
-    } catch (error) {
-      debugError('AI enhancement failed:', error);
-      alert('AI enhancement failed. Please check your API key and try again.');
-    } finally {
-      setIsEnhancing(false);
-    }
-  };
 
 
   const handleAIGenerateHTML = async () => {
@@ -416,36 +390,50 @@ function EditorContent() {
     setIsGeneratingHTML(true);
     
     try {
-      debugLog('🚀 Starting AI HTML generation with layout guidance...');
+      debugLog('🚀 Starting AI HTML generation...');
       debugLog('📝 Content length:', content.length);
-      debugLog('📐 Selected layout:', selectedLayout);
-      debugLog('💡 Layout guidance:', layoutGuidance);
-      debugLog('🖼️ Uploaded images:', uploadedImages.length);
+      debugLog('📝 Content preview:', content.substring(0, 200));
       
-      // Use the new method with layout guidance and images
-      const result = await aiSlideGeneratorV2.generateStructurePreservingSlidesWithGuidance(
-        content,
-        layoutGuidance,
-        selectedLayout,
-        uploadedImages
-      );
+      const result = await prdParser.parseMarkdownWithAI(content);
       
       debugLog('✅ AI HTML generation result:', result);
       
-      if (result && result.htmlSlides && result.htmlSlides.length > 0) {
-        debugLog('✅ AI HTML slides generated:', result);
-        debugLog('📊 Number of slides generated:', result.htmlSlides.length);
-        debugLog('🔍 First slide preview:', result.htmlSlides[0]);
+      if (result.aiEnhanced && result.aiEnhanced.htmlSlides && result.aiEnhanced.htmlSlides.length > 0) {
+        debugLog('✅ AI HTML slides generated:', result.aiEnhanced);
+        debugLog('📊 Number of slides generated:', result.aiEnhanced.htmlSlides.length);
+        debugLog('🔍 First slide preview:', result.aiEnhanced.htmlSlides[0]);
         
         // Set state with detailed logging
         debugLog('🔄 Setting aiGeneratedSlides state...');
-        setAiGeneratedSlides(result);
+        setAiGeneratedSlides(result.aiEnhanced);
         
         debugLog('🔄 Setting useAISlides to true...');
         setUseAISlides(true);
         
+        
+        // 🚀 AUTOMATIC SAVE: Persist AI slides immediately
+        debugLog('💾 Auto-saving AI slides...');
+        try {
+          const presentationId = await presentationStorage.savePresentation(
+            content,
+            result.presentation,
+            result.aiEnhanced,
+            true // useAISlides = true
+          );
+          debugLog('✅ AI slides auto-saved with ID:', presentationId);
+          
+          // Update URL to include the saved presentation ID
+          const newUrl = `${window.location.origin}/editor?id=${presentationId}`;
+          window.history.replaceState({}, '', newUrl);
+          
+          setHasUnsavedChanges(false); // Mark as saved
+        } catch (saveError) {
+          debugError('⚠️ Auto-save failed:', saveError);
+          // Continue anyway - slides are in memory
+        }
+        
         debugLog('✅ State updates complete');
-        alert(`Successfully generated ${result.htmlSlides.length} AI-powered HTML slides with layout guidance! View switched to AI slides.`);
+        alert(`Successfully generated ${result.aiEnhanced.htmlSlides.length} AI-powered HTML slides! View switched to AI slides.`);
       } else {
         throw new Error('No AI-enhanced content was generated');
       }
@@ -457,7 +445,8 @@ function EditorContent() {
     }
   };
 
-  
+
+
   const handlePRDModification = async () => {
     if (!modificationDescription.trim()) {
       alert('Please describe the changes you want to make to the PRD.');
@@ -509,51 +498,7 @@ function EditorContent() {
     }
   };
 
-  
-  // Image upload and layout guidance functions
-  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []);
-    const imagePromises = files.map(file => {
-      return new Promise<{id: number; name: string; url: string; size: number}>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          resolve({
-            id: Date.now() + Math.random(),
-            name: file.name,
-            url: e.target?.result as string,
-            size: file.size
-          });
-        };
-        reader.readAsDataURL(file);
-      });
-    });
 
-    Promise.all(imagePromises).then(images => {
-      setUploadedImages(prev => [...prev, ...images]);
-    });
-  };
-
-  const removeImage = (imageId: number) => {
-    setUploadedImages(prev => prev.filter(img => img.id !== imageId));
-  };
-
-  const getLayoutGuidanceText = () => {
-    let guidance = '';
-    
-    if (selectedLayout !== 'auto') {
-      guidance += `Layout: ${selectedLayout}\n`;
-    }
-    
-    if (layoutGuidance.trim()) {
-      guidance += `Custom guidance: ${layoutGuidance}\n`;
-    }
-    
-    if (uploadedImages.length > 0) {
-      guidance += `Images to include: ${uploadedImages.map(img => img.name).join(', ')}\n`;
-    }
-    
-    return guidance;
-  };
 
   const presentationCount = presentation?.slides.length || 0;
 
@@ -561,75 +506,55 @@ function EditorContent() {
     <div className="min-h-screen bg-slate-950 text-slate-50 flex flex-col">
       <Navigation />
       <div className="flex-1 flex flex-col">
-        
         {/* PRD Modification Section */}
-        <div className="p-4 bg-slate-900/30 border-b border-slate-800">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles className="w-4 h-4 text-purple-400" />
-            <h3 className="text-sm font-medium text-purple-400">AI PRD Modification</h3>
-          </div>
-          
-          <div className="flex gap-2">
-
-            <Textarea
-              ref={modificationTextareaRef}
-              placeholder="Describe the changes you want to make to the PRD (e.g., 'Add a slide about pricing', 'Make the tone more casual', 'Add technical specifications')"
-              value={modificationDescription}
-              onChange={(e) => setModificationDescription(e.target.value)}
-              className="flex-1 min-h-[60px] bg-slate-800 border-slate-700 text-slate-100 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-              disabled={isModifyingPRD}
-              onFocus={(e) => {
-                // Ensure the textarea gets focus and prevents event bubbling
-                e.target.focus();
-                e.stopPropagation();
-              }}
-              onKeyDown={(e) => {
-                // Prevent keyboard events from bubbling to parent elements
-                e.stopPropagation();
-              }}
-              onMouseDown={(e) => {
-                // Prevent mouse events from interfering with focus
-                e.stopPropagation();
-              }}
-              onBlur={(e) => {
-                // Prevent blur events from bubbling
-                e.stopPropagation();
-              }}
-            />
-            <Button
-              onClick={handlePRDModification}
-              disabled={isModifyingPRD || !modificationDescription.trim() || !hasApiKey}
-              className="bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700"
-            >
-              {isModifyingPRD ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Modifying...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  Modify PRD
-                </>
-              )}
-            </Button>
-          </div>
-          
-          {/* Modification History */}
-          {modificationHistory.length > 0 && (
-            <div className="mt-3">
-              <h4 className="text-xs font-medium text-slate-400 mb-2">Recent Modifications:</h4>
-              <div className="space-y-1 max-h-20 overflow-y-auto">
-                {modificationHistory.slice(-3).map((mod, index) => (
-                  <div key={index} className="text-xs text-slate-500 bg-slate-800/50 p-2 rounded">
-                    <div className="font-medium">{mod.description}</div>
-                    <div className="text-slate-600">{mod.timestamp.toLocaleTimeString()}</div>
-                  </div>
-                ))}
-              </div>
+          <div className="p-4 bg-slate-900/30 border-b border-slate-800">
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles className="w-4 h-4 text-purple-400" />
+              <h3 className="text-sm font-medium text-purple-400">AI PRD Modification</h3>
             </div>
-          )}
-        </div>
+            
+            <div className="flex gap-2">
+              <Textarea
+                placeholder="Describe the changes you want to make to the PRD (e.g., 'Add a slide about pricing', 'Make the tone more casual', 'Add technical specifications')"
+                value={modificationDescription}
+                onChange={(e) => setModificationDescription(e.target.value)}
+                className="flex-1 min-h-[60px] bg-slate-800 border-slate-700 text-slate-100"
+                disabled={isModifyingPRD}
+              />
+              <Button
+                onClick={handlePRDModification}
+                disabled={isModifyingPRD || !modificationDescription.trim() || !hasApiKey}
+                className="bg-purple-600 hover:bg-purple-700 disabled:bg-slate-700"
+              >
+                {isModifyingPRD ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Modifying...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Modify PRD
+                  </>
+                )}
+              </Button>
+            </div>
+        {/* Modification History */}
+            {modificationHistory.length > 0 && (
+              <div className="mt-3">
+                <h4 className="text-xs font-medium text-slate-400 mb-2">Recent Modifications:</h4>
+                <div className="space-y-1 max-h-20 overflow-y-auto">
+                  {modificationHistory.slice(-3).map((mod, index) => (
+                    <div key={index} className="text-xs text-slate-500 bg-slate-800/50 p-2 rounded">
+                      <div className="font-medium">{mod.description}</div>
+                      <div className="text-slate-600">{mod.timestamp.toLocaleTimeString()}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
       {/* Top Bar */}
       <div className="flex items-center justify-between p-4 bg-slate-900/50 border-b border-slate-800">
         <div className="flex items-center gap-4">
@@ -672,51 +597,6 @@ function EditorContent() {
           </div>
           
 
-
-          {/* Slide type toggle - More prominent */}
-          {aiGeneratedSlides && aiGeneratedSlides.htmlSlides && aiGeneratedSlides.htmlSlides.length > 0 ? (
-            <div className="flex items-center gap-3 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700">
-              <span className="text-sm font-medium text-slate-200">View Mode:</span>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant={useAISlides ? "default" : "outline"}
-                  size="sm"
-                                  onClick={() => {
-                  debugLog('🔄 Switching to AI slides');
-                  setUseAISlides(true);
-                }}
-                  className={cn(
-                    "text-xs transition-all",
-                    useAISlides 
-                      ? "bg-gradient-to-r from-cyan-600 to-pink-600 hover:from-cyan-700 hover:to-pink-700" 
-                      : ""
-                  )}
-                >
-                  <Sparkles className="w-3 h-3 mr-1" />
-                  AI Slides
-                </Button>
-                <Button
-                  variant={!useAISlides ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => {
-                    debugLog('🔄 Switching to Markdown slides');
-                    setUseAISlides(false);
-                  }}
-                  className="text-xs"
-                >
-                  <FileText className="w-3 h-3 mr-1" />
-                  Markdown
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="text-xs text-yellow-400 px-2 py-1 bg-yellow-900/20 rounded">
-              {aiGeneratedSlides ? 'AI slides structure invalid' : 'No AI slides generated yet'}
-            </div>
-          )}
-          
-
-          
 
         </div>
 
@@ -816,11 +696,44 @@ function EditorContent() {
             </Button>
           )}
 
+          {aiGeneratedSlides && (
+            <Button 
+              size="sm" 
+              onClick={async () => {
+                if (!presentation) {
+                  alert('Please ensure the PRD is valid before presenting.');
+                  return;
+                }
+                try {
+                  const presentationId = await presentationStorage.savePresentation(
+                    content, 
+                    presentation, 
+                    aiGeneratedSlides, 
+                    useAISlides
+                  );
+                  setHasUnsavedChanges(false);
+                  alert(`AI slides saved! ID: ${presentationId}`);
+                } catch (err) {
+                  debugError('Failed to save AI slides:', err);
+                  alert('Failed to save AI slides. Please try again.');
+                }
+              }}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              Save AI Slides
+            </Button>
+          )}
+
           {presentation && (
             <Button 
               size="sm" 
               className="bg-blue-600 hover:bg-blue-700" 
               onClick={async () => {
+                if (!presentation) {
+                  alert('Please ensure the PRD is valid before presenting.');
+                  return;
+                }
                 try {
                   const presentationId = await presentationStorage.savePresentation(
                     content, 
@@ -846,36 +759,34 @@ function EditorContent() {
       {/* Main Content */}
       <div className="flex-1">
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="h-full">
-          <TabsList className="grid w-full grid-cols-2 bg-slate-900/50">
-            <TabsTrigger value="edit" className="flex items-center gap-2">
-              <Code className="w-4 h-4" />
-              Edit
-            </TabsTrigger>
+          <TabsList className="grid w-full grid-cols-1 bg-slate-900/50">
             <TabsTrigger value="preview" className="flex items-center gap-2">
               <Eye className="w-4 h-4" />
               Preview
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="edit" className="h-[calc(100%-48px)] m-0">
+
+
+          <TabsContent value="preview" className="h-[calc(100%-48px)] m-0">
             <PanelGroup direction="horizontal">
               {/* Editor Panel */}
               <Panel defaultSize={50} minSize={30}>
-                <div className="h-full flex flex-col bg-slate-900/30">
+                <div className="h-full flex flex-col bg-slate-900/30 relative z-10">
                   <div className="p-4 border-b border-slate-800">
                     <h3 className="font-medium">Markdown Editor</h3>
                     <p className="text-sm text-slate-200">
                       Edit your PRD content with live validation
                     </p>
                   </div>
-                  <div className="flex-1 p-4">
-
+                  <div className="flex-1 p-4 relative">
                     <Textarea
                       ref={textareaRef}
                       value={content}
                       onChange={(e) => handleContentChange(e.target.value)}
-                      className="w-full h-full resize-none font-mono text-sm bg-slate-950 border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      className="w-full h-full resize-none font-mono text-sm bg-slate-950 border-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 relative z-20"
                       placeholder="Enter your PRD content..."
+                      autoFocus={true}
                       onFocus={(e) => {
                         // Ensure the textarea gets focus and prevents event bubbling
                         e.target.focus();
@@ -883,10 +794,6 @@ function EditorContent() {
                       }}
                       onKeyDown={(e) => {
                         // Prevent keyboard events from bubbling to parent elements
-                        e.stopPropagation();
-                      }}
-                      onMouseDown={(e) => {
-                        // Prevent mouse events from interfering with focus
                         e.stopPropagation();
                       }}
                     />
@@ -898,7 +805,7 @@ function EditorContent() {
 
               {/* Preview Panel */}
               <Panel defaultSize={50} minSize={30}>
-                <div className="h-full flex flex-col">
+                <div className="h-full flex flex-col relative z-0">
                   <div className="p-4 border-b border-slate-800 bg-slate-900/30">
                     <div className="flex items-center justify-between">
                       <div>
@@ -924,18 +831,49 @@ function EditorContent() {
                       )}
                     </div>
                   </div>
-                  <div className="flex-1 bg-slate-950">
-                    {validationError ? (
-                      <div className="h-full flex items-center justify-center p-8">
-                        <Card className="bg-red-900/20 border-red-800">
-                          <CardContent className="p-6 text-center">
-                            <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-                            <h3 className="font-semibold text-red-200 mb-2">Validation Error</h3>
-                            <p className="text-sm text-red-300">{validationError}</p>
-                          </CardContent>
-                        </Card>
+                    
+                  {/* View Mode Toggle - Now positioned closer to preview */}
+                  {aiGeneratedSlides && aiGeneratedSlides.htmlSlides && aiGeneratedSlides.htmlSlides.length > 0 && (
+                    <div className="flex items-center justify-center mt-3 pt-3 border-t border-slate-700">
+                      <div className="flex items-center gap-3 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700">
+                        <span className="text-sm font-medium text-slate-200">View Mode:</span>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant={useAISlides ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => {
+                              debugLog('🔄 Switching to AI slides');
+                              setUseAISlides(true);
+                            }}
+                            className={cn(
+                              "text-xs transition-all",
+                              useAISlides 
+                                ? "bg-gradient-to-r from-cyan-600 to-pink-600 hover:from-cyan-700 hover:to-pink-700" 
+                                : ""
+                            )}
+                          >
+                            <Sparkles className="w-3 h-3 mr-1" />
+                            AI Slides
+                          </Button>
+                          <Button
+                            variant={!useAISlides ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => {
+                              debugLog('🔄 Switching to Markdown slides');
+                              setUseAISlides(false);
+                            }}
+                            className="text-xs"
+                          >
+                            <FileText className="w-3 h-3 mr-1" />
+                            Markdown
+                          </Button>
+                        </div>
                       </div>
-                    ) : presentation ? (
+                    </div>
+                  )}
+                  
+                  <div className="flex-1 bg-slate-950">
+                    {presentation ? (
                       <ClientPresentationViewer 
                         presentation={presentation} 
                         aiEnhancedPresentation={aiGeneratedSlides}
@@ -943,10 +881,15 @@ function EditorContent() {
                       />
                     ) : (
                       <div className="h-full flex items-center justify-center">
-                        <div className="text-center text-slate-200">
-                          <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-2" />
-                          <p>Processing PRD...</p>
-                        </div>
+                        <Card className="bg-slate-900/50 border-slate-700">
+                          <CardContent className="p-8 text-center">
+                            <AlertCircle className="w-12 h-12 text-yellow-400 mx-auto mb-4" />
+                            <h3 className="font-semibold mb-2">No Valid Presentation</h3>
+                            <p className="text-sm text-slate-200">
+                              Please fix the PRD format to see the preview
+                            </p>
+                          </CardContent>
+                        </Card>
                       </div>
                     )}
                   </div>
@@ -954,32 +897,7 @@ function EditorContent() {
               </Panel>
             </PanelGroup>
           </TabsContent>
-
-          <TabsContent value="preview" className="h-[calc(100%-48px)] m-0">
-                      <div className="h-full">
-            {presentation ? (
-              <ClientPresentationViewer 
-                presentation={presentation} 
-                aiEnhancedPresentation={aiGeneratedSlides}
-                useAISlides={useAISlides}
-              />
-            ) : (
-                <div className="h-full flex items-center justify-center">
-                  <Card className="bg-slate-900/50 border-slate-700">
-                    <CardContent className="p-8 text-center">
-                      <AlertCircle className="w-12 h-12 text-yellow-400 mx-auto mb-4" />
-                      <h3 className="font-semibold mb-2">No Valid Presentation</h3>
-                      <p className="text-sm text-slate-200">
-                        Please fix the PRD format to see the preview
-                      </p>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </div>
-          </TabsContent>
         </Tabs>
-      </div>
       </div>
     </div>
   );

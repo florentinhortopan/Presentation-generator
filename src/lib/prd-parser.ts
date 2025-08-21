@@ -307,10 +307,15 @@ export class PRDParser {
 
     // Try to generate AI-enhanced version
     if (process.env.NEXT_PUBLIC_OPENAI_API_KEY) {
+      console.log('🔑 API key detected, length:', process.env.NEXT_PUBLIC_OPENAI_API_KEY.length);
       try {
         console.log('🤖 Generating AI-enhanced slides...');
-        aiEnhanced = await aiSlideGeneratorV2.generateEnhancedPresentation(content);
+        console.log('📝 PRD Content length:', content.length);
+        console.log('📝 PRD Content preview:', content.substring(0, 200));
+        aiEnhanced = await aiSlideGeneratorV2.generateStructurePreservingSlides(content);
         console.log('✅ AI enhancement completed');
+        console.log('📊 AI Enhanced result:', aiEnhanced);
+        console.log('📊 Number of slides:', aiEnhanced?.htmlSlides?.length || 0);
       } catch (error) {
         console.warn('❌ AI enhancement failed:', error);
         // Continue with standard presentation

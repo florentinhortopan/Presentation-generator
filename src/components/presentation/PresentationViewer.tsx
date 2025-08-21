@@ -171,8 +171,7 @@ export function PresentationViewer({ presentation, aiEnhancedPresentation, useAI
   };
 
   const slideTransition = {
-    type: "tween",
-    ease: "anticipate",
+    ease: "easeInOut",
     duration: meta.theme.animation.duration,
   };
 
@@ -200,7 +199,6 @@ export function PresentationViewer({ presentation, aiEnhancedPresentation, useAI
             initial="enter"
             animate="center"
             exit="exit"
-            transition={slideTransition}
           >
             {useAISlides && aiEnhancedPresentation && currentSlide ? (
               <AISlideRenderer 

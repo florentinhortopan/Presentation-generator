@@ -518,13 +518,13 @@ Focus on creating a presentation that truly reflects the specified tone and voic
 
     try {
       const response = await openai.chat.completions.create({
-        model: 'gpt-4-turbo-preview',
+        model: 'gpt-4o',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
         temperature: 0.3, // Lower temperature for more consistent output
-        max_tokens: 4000,
+        max_tokens: 4000, // Increased to handle more slides
       });
 
       return response.choices[0]?.message?.content || '';
@@ -669,7 +669,7 @@ Focus on creating a presentation that truly reflects the specified tone and voic
     console.log('🔄 Trying fallback parsing without manifest...');
     
     // Try to extract any HTML sections
-    const sectionMatches = Array.from(response.matchAll(/<section[\s\S]*?<\/section>/g));
+    const sectionMatches = Array.from(response.matchAll(/<section[\s\S]*<\/section>/g));
     console.log(`📊 Found ${sectionMatches.length} section elements`);
     
     const htmlSlides: AIGeneratedSlide[] = [];
@@ -748,6 +748,566 @@ Focus on creating a presentation that truly reflects the specified tone and voic
     return {
       manifest: fallbackManifest,
       htmlSlides
+    };
+  }
+
+
+  /**
+   * Split PRD content into chunks and generate slides in batches
+   */
+  private splitPRDIntoChunks(prdContent: string): string[] {
+    // Split by slide markers (--- or # headers)
+    const sections = prdContent.split(/(?=^#{1,2} )/gm).filter(section => section.trim());
+    
+    const chunks: string[] = [];
+    let currentChunk = '';
+    const maxChunkLength = 2000; // Conservative chunk size
+    
+    for (const section of sections) {
+      // If adding this section would exceed max length, save current chunk and start new one
+      if (currentChunk.length + section.length > maxChunkLength && currentChunk.length > 0) {
+        chunks.push(currentChunk.trim());
+        currentChunk = section;
+      } else {
+        currentChunk += (currentChunk ? '\n\n' : '') + section;
+      }
+    }
+    
+    // Add the last chunk
+    if (currentChunk.trim()) {
+      chunks.push(currentChunk.trim());
+    }
+    
+    return chunks;
+  }
+
+  /**
+   * Generate slides for a specific chunk with context
+   */
+  private async generateChunkSlides(
+    chunkContent: string, 
+    chunkIndex: number, 
+    totalChunks: number,
+    presentationContext: string
+  ): Promise<AIGeneratedSlide[]> {
+    console.log(`🔄 Processing chunk ${chunkIndex + 1}/${totalChunks}...`);
+    
+    const systemPrompt = `You are an expert presentation designer. Generate HTML slides for this chunk of a PRD.
+
+CONTEXT: This is chunk ${chunkIndex + 1} of ${totalChunks} from a Product Requirements Document.
+Presentation Context: ${presentationContext}
+
+REQUIREMENTS:
+1. Generate 1-3 high-quality HTML slides for the provided content
+2. Each slide must be a complete <section> element with proper styling
+3. Use data attributes: data-slide-id, data-slide-type, data-slide-style, data-transition
+4. Apply dark theme with professional styling
+5. Make slides responsive and visually engaging
+6. Include proper animations and transitions
+
+SLIDE TYPES:
+- hero: Title/opening slides
+- content: Main content slides
+- list: Bullet points or lists
+- summary: Conclusion/summary slides
+
+SLIDE STYLES:
+- dark: Standard dark theme
+- accent: With brand colors
+- highlight: Important content
+- callout: Special attention
+
+Return ONLY the HTML <section> elements, no additional text or explanation.`;
+
+    const userPrompt = `PRD Content Chunk:
+
+${chunkContent}
+
+Generate beautiful, responsive HTML slides for this content.`;
+
+    try {
+      const response = await this.callOpenAI(systemPrompt, userPrompt);
+      
+      // Extract section elements
+      const sectionMatches = response.matchAll(/<section[\s\S]*?<\/section>/g);
+      const htmlSlides: AIGeneratedSlide[] = [];
+
+      for (const match of sectionMatches) {
+        const htmlContent = match[0];
+        
+        // Extract metadata
+        const idMatch = htmlContent.match(/data-slide-id="([^"]+)"/);
+        const typeMatch = htmlContent.match(/data-slide-type="([^"]+)"/);
+        const styleMatch = htmlContent.match(/data-slide-style="([^"]+)"/);
+        const transitionMatch = htmlContent.match(/data-transition="([^"]+)"/);
+
+        htmlSlides.push({
+          id: idMatch?.[1] || `chunk-${chunkIndex}-slide-${htmlSlides.length + 1}`,
+          htmlContent: htmlContent.trim(),
+          metadata: {
+            type: typeMatch?.[1] || 'content',
+            style: styleMatch?.[1] || 'dark',
+            transition: transitionMatch?.[1] || 'fade'
+          }
+        });
+      }
+
+      console.log(`✅ Generated ${htmlSlides.length} slides for chunk ${chunkIndex + 1}`);
+      return htmlSlides;
+    } catch (error) {
+      console.error(`❌ Chunk ${chunkIndex + 1} generation failed:`, error);
+      // Return empty array on failure to continue with other chunks
+      return [];
+    }
+  }
+
+  /**
+   * Generate slides using chunked approach for better token management
+   */
+  
+  
+  async generateStructurePreservingSlides(prdContent: string): Promise<AIEnhancedPresentation> {
+    return this.generateStructurePreservingSlidesWithGuidance(prdContent, '', 'auto', []);
+  }
+
+  async generateStructurePreservingSlidesWithGuidance(
+    prdContent: string, 
+    layoutGuidance: string = '', 
+    selectedLayout: string = 'auto',
+    uploadedImages: Array<{id: number; name: string; url: string; size: number}> = []
+  ): Promise<AIEnhancedPresentation> {
+    console.log('🎯 Starting STRUCTURE-PRESERVING AI generation with layout guidance...');
+    console.log('📐 Layout:', selectedLayout);
+    console.log('💡 Guidance:', layoutGuidance);
+    console.log('🖼️ Images:', uploadedImages.length);
+    
+    // Use same splitting logic as PRD parser
+    const slideDelimiters = /^(?:---|#{1,2}\s+(?:Slide|slide))/gm;
+    const sections = prdContent.split(slideDelimiters).filter(section => section.trim());
+    
+    console.log(`📋 Original PRD has ${sections.length} sections - will generate exactly ${sections.length} slides`);
+    
+    const htmlSlides: AIGeneratedSlide[] = [];
+    
+    for (let i = 0; i < sections.length; i++) {
+      const section = sections[i].trim();
+      if (!section) continue;
+      
+      console.log(`🔄 Processing section ${i + 1}/${sections.length} with AI...`);
+      
+      // Call AI to enhance this section with layout guidance
+      const enhancedSlide = await this.enhanceSectionWithAIAndGuidance(
+        section, 
+        i + 1, 
+        layoutGuidance, 
+        selectedLayout, 
+        uploadedImages
+      );
+      htmlSlides.push(enhancedSlide);
+      
+      // Small delay between API calls
+      if (i < sections.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+    }
+    
+    console.log(`✅ Generated exactly ${htmlSlides.length} AI-enhanced slides with layout guidance`);
+    
+    const titleMatch = prdContent.match(/^# (.+)$/m);
+    const presentationTitle = titleMatch?.[1] || 'Presentation';
+    
+    return {
+      manifest: {
+        meta: {
+          title: presentationTitle,
+          author: 'AI Generated',
+          theme: {
+            primary: '#00E0FF',
+            secondary: '#FF00AA',
+            tone: 'professional',
+            voice: 'engaging'
+          }
+        },
+        slides: htmlSlides.map((slide, index) => ({
+          id: slide.id,
+          title: `Slide ${index + 1}`,
+          type: slide.metadata.type,
+          style: slide.metadata.style,
+          transition: slide.metadata.transition,
+          content_summary: 'AI-enhanced content'
+        }))
+      },
+      htmlSlides
+    };
+  }
+
+  /**
+   * Enhance a single section with AI
+   */
+  
+  private async enhanceSectionWithAI(sectionContent: string, slideNumber: number): Promise<AIGeneratedSlide> {
+    const systemPrompt = `You are an expert presentation designer. Create BEAUTIFUL, PROFESSIONAL HTML slides.
+
+REQUIREMENTS:
+- Generate EXACTLY ONE <section> element with rich, modern styling
+- Use the content provided, enhance with professional design
+- Apply modern CSS with gradients, shadows, and animations
+- Use data-slide-id="slide-${slideNumber}"
+- Create visually stunning, presentation-ready slides
+
+DESIGN PATTERNS:
+- Hero slides: Large titles with gradient backgrounds
+- Content slides: Clean cards with subtle shadows
+- List slides: Beautiful bullet points with icons
+- Summary slides: Elegant conclusions with highlights
+
+MODERN CSS FEATURES:
+- Linear gradients for backgrounds
+- Box shadows for depth
+- Border radius for modern look
+- Flexbox/Grid for layouts
+- Smooth transitions and animations
+- Professional typography
+
+EXAMPLE STRUCTURE:
+<section data-slide-id="slide-${slideNumber}" data-slide-type="TYPE" data-slide-style="modern" class="slide">
+  <div class="slide-container" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 2rem; border-radius: 1rem; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+    <div class="content">
+      [RICH, BEAUTIFUL CONTENT WITH MODERN STYLING]
+    </div>
+  </div>
+</section>
+
+FOCUS: Create stunning, professional slides that look like they were designed by a top presentation designer.`;
+
+    const userPrompt = `Section content:
+${sectionContent}
+
+Transform into ONE BEAUTIFUL, PROFESSIONAL HTML slide with modern styling, gradients, and visual appeal.`;
+
+    try {
+      const response = await this.callOpenAI(systemPrompt, userPrompt);
+      
+      // Extract the single section
+      const sectionMatch = response.match(/<section[\s\S]*?<\/section>/);
+      const htmlContent = sectionMatch?.[0] || this.createFallbackSlide(sectionContent, slideNumber);
+      
+      // Detect slide type from content
+      const slideType = this.detectSlideType(sectionContent);
+      
+      return {
+        id: `slide-${slideNumber}`,
+        htmlContent: htmlContent.trim(),
+        metadata: {
+          type: slideType,
+          style: 'modern',
+          transition: 'fade'
+        }
+      };
+    } catch (error) {
+      console.error(`❌ Error enhancing section ${slideNumber}:`, error);
+      return {
+        id: `slide-${slideNumber}`,
+        htmlContent: this.createFallbackSlide(sectionContent, slideNumber),
+        metadata: {
+          type: 'content',
+          style: 'modern',
+          transition: 'fade'
+        }
+      };
+    }
+  }
+
+  
+  /**
+   * Enhance a single section with AI and layout guidance
+   */
+  private async enhanceSectionWithAIAndGuidance(
+    sectionContent: string, 
+    slideNumber: number, 
+    layoutGuidance: string, 
+    selectedLayout: string,
+    uploadedImages: Array<{id: number; name: string; url: string; size: number}>
+  ): Promise<AIGeneratedSlide> {
+    // Build layout-specific guidance
+    let layoutInstructions = '';
+    
+    if (selectedLayout !== 'auto') {
+      layoutInstructions += `\nLAYOUT TEMPLATE: ${selectedLayout.toUpperCase()}\n`;
+      
+      switch (selectedLayout) {
+        case 'hero':
+          layoutInstructions += '- Use large, prominent titles\n- Add gradient backgrounds\n- Include hero imagery or icons\n- Make it visually striking\n';
+          break;
+        case 'content':
+          layoutInstructions += '- Focus on text readability\n- Use clean typography\n- Organize content in clear sections\n- Minimal decorative elements\n';
+          break;
+        case 'grid':
+          layoutInstructions += '- Use multi-column layouts\n- Organize content in grid format\n- Balance visual elements\n- Use cards or boxes for content\n';
+          break;
+        case 'split':
+          layoutInstructions += '- Split content and images side-by-side\n- Use 50/50 or 60/40 layouts\n- Balance text and visual elements\n- Include relevant imagery\n';
+          break;
+        case 'minimal':
+          layoutInstructions += '- Use lots of whitespace\n- Clean, simple design\n- Focus on essential content\n- Subtle, elegant styling\n';
+          break;
+        case 'modern':
+          layoutInstructions += '- Use gradients and shadows\n- Modern card-based design\n- Contemporary color schemes\n- Smooth animations and effects\n';
+          break;
+      }
+    }
+    
+    if (layoutGuidance.trim()) {
+      layoutInstructions += `\nCUSTOM GUIDANCE: ${layoutGuidance}\n`;
+    }
+    
+    if (uploadedImages.length > 0) {
+      layoutInstructions += `\nIMAGES TO INCLUDE: ${uploadedImages.map(img => img.name).join(', ')}\n`;
+      layoutInstructions += '- Integrate uploaded images appropriately\n';
+      layoutInstructions += '- Use images to enhance the content\n';
+      layoutInstructions += '- Ensure images complement the layout\n';
+    }
+
+    const systemPrompt = `You are an expert presentation designer. Create BEAUTIFUL, PROFESSIONAL HTML slides.
+
+REQUIREMENTS:
+- Generate EXACTLY ONE <section> element with rich, modern styling
+- Use the content provided, enhance with professional design
+- Apply modern CSS with gradients, shadows, and animations
+- Use data-slide-id="slide-${slideNumber}"
+- Create visually stunning, presentation-ready slides
+
+${layoutInstructions}
+
+DESIGN PATTERNS:
+- Hero slides: Large titles with gradient backgrounds
+- Content slides: Clean cards with subtle shadows
+- List slides: Beautiful bullet points with icons
+- Summary slides: Elegant conclusions with highlights
+
+MODERN CSS FEATURES:
+- Linear gradients for backgrounds
+- Box shadows for depth
+- Border radius for modern look
+- Flexbox/Grid for layouts
+- Smooth transitions and animations
+- Professional typography
+
+EXAMPLE STRUCTURE:
+<section data-slide-id="slide-${slideNumber}" data-slide-type="TYPE" data-slide-style="modern" class="slide">
+  <div class="slide-container" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 2rem; border-radius: 1rem; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+    <div class="content">
+      [RICH, BEAUTIFUL CONTENT WITH MODERN STYLING]
+    </div>
+  </div>
+</section>
+
+FOCUS: Create stunning, professional slides that follow the specified layout guidance and look like they were designed by a top presentation designer.`;
+
+    const userPrompt = `Section content:
+${sectionContent}
+
+Transform into ONE BEAUTIFUL, PROFESSIONAL HTML slide with modern styling, gradients, and visual appeal.`;
+
+    try {
+      const response = await this.callOpenAI(systemPrompt, userPrompt);
+      
+      // Extract the HTML content
+      const htmlMatch = response.match(/<section[\s\S]*?<\/section>/);
+      if (!htmlMatch) {
+        throw new Error('No valid HTML section found in AI response');
+      }
+      
+      const htmlContent = htmlMatch[0];
+      
+      // Extract metadata from the HTML
+      const typeMatch = htmlContent.match(/data-slide-type="([^"]+)"/);
+      const styleMatch = htmlContent.match(/data-slide-style="([^"]+)"/);
+      
+      return {
+        id: `slide-${slideNumber}`,
+        htmlContent,
+        metadata: {
+          type: typeMatch?.[1] || 'content',
+          style: styleMatch?.[1] || 'modern',
+          transition: 'fade'
+        }
+      };
+    } catch (error) {
+      console.error(`❌ Error enhancing section ${slideNumber}:`, error);
+      
+      // Fallback to basic HTML if AI fails
+      return {
+        id: `slide-${slideNumber}`,
+        htmlContent: `<section data-slide-id="slide-${slideNumber}" data-slide-type="content" data-slide-style="modern" class="slide">
+          <div class="slide-container" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 2rem; border-radius: 1rem; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+            <div class="content">
+              <h1 style="color: white; font-size: 2.5rem; margin-bottom: 1rem;">Slide ${slideNumber}</h1>
+              <div style="color: #cbd5e1; font-size: 1.1rem; line-height: 1.6;">
+                ${sectionContent.replace(/\n/g, '<br>')}
+              </div>
+            </div>
+          </div>
+        </section>`,
+        metadata: {
+          type: 'content',
+          style: 'modern',
+          transition: 'fade'
+        }
+      };
+    }
+  }
+
+  /**
+   * Create a beautiful fallback slide
+   */
+  private createFallbackSlide(content: string, slideNumber: number): string {
+    return `<section data-slide-id="slide-${slideNumber}" data-slide-type="content" data-slide-style="modern" class="slide">
+      <div class="slide-container" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 2rem; border-radius: 1rem; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+        <div class="content">
+          <h1 style="color: white; font-size: 2.5rem; margin-bottom: 1rem;">Slide ${slideNumber}</h1>
+          <div style="color: #cbd5e1; font-size: 1.1rem; line-height: 1.6;">
+            ${content.replace(/\n/g, '<br>')}
+          </div>
+        </div>
+      </div>
+    </section>`;
+  }
+
+  
+  /**
+   * Modify a PRD based on user description using AI
+   */
+  async modifyPRD(prdContent: string, modificationDescription: string): Promise<string> {
+    console.log('🤖 Modifying PRD with description:', modificationDescription);
+    
+    const systemPrompt = `You are an expert PRD (Product Requirements Document) editor. 
+    
+Your task is to modify the provided PRD based on the user's description while maintaining:
+- The original structure and format
+- All existing content unless specifically asked to remove
+- The markdown formatting and frontmatter
+- Professional tone and quality
+
+MODIFICATION GUIDELINES:
+- Add new slides/sections if requested
+- Modify existing content based on the description
+- Maintain consistent formatting
+- Preserve all metadata (frontmatter)
+- Keep the same slide structure and numbering
+- Ensure the result is a valid markdown PRD
+
+RESPONSE FORMAT:
+Return ONLY the complete modified PRD content in markdown format.
+Do not include any explanations or additional text outside the PRD content.`;
+
+    const userPrompt = `Original PRD Content:
+${prdContent}
+
+User's Modification Request:
+${modificationDescription}
+
+Please modify the PRD according to the user's request and return the complete updated PRD content.`;
+
+    try {
+      const response = await this.callOpenAI(systemPrompt, userPrompt);
+      
+      // Clean up the response to ensure it's just the PRD content
+      let modifiedContent = response.trim();
+      
+      // Remove any markdown code block markers if present
+      modifiedContent = modifiedContent.replace(/^\`\`\`markdown\n?/, '').replace(/\n?\`\`\`$/, '');
+      
+      // Ensure the content starts with frontmatter or a heading
+      if (!modifiedContent.startsWith('---') && !modifiedContent.startsWith('#')) {
+        throw new Error('AI response does not appear to be a valid PRD format');
+      }
+      
+      console.log('✅ PRD modification completed successfully');
+      return modifiedContent;
+      
+    } catch (error) {
+      console.error('❌ PRD modification failed:', error);
+      throw new Error(`Failed to modify PRD: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+
+  /**
+   * Detect slide type from content
+   */
+  private detectSlideType(content: string): string {
+    const lowerContent = content.toLowerCase();
+    
+    if (lowerContent.includes('# ') && content.split('\n').length < 5) return 'hero';
+    if (lowerContent.includes('- ') || lowerContent.includes('* ')) return 'bullet';
+    if (lowerContent.includes('conclusion') || lowerContent.includes('summary')) return 'summary';
+    
+    return 'content';
+  }
+  async generateEnhancedPresentationChunked(prdContent: string): Promise<AIEnhancedPresentation> {
+    console.log('🤖 Starting chunked AI slide generation...');
+    
+    // Extract presentation context (title, metadata)
+    const titleMatch = prdContent.match(/^# (.+)$/m);
+    const presentationTitle = titleMatch?.[1] || 'Presentation';
+    
+    // Split content into manageable chunks
+    const chunks = this.splitPRDIntoChunks(prdContent);
+    console.log(`📋 Split PRD into ${chunks.length} chunks`);
+    
+    const allSlides: AIGeneratedSlide[] = [];
+    let totalSlideCount = 0;
+    
+    // Process each chunk
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        const chunkSlides = await this.generateChunkSlides(
+          chunks[i], 
+          i, 
+          chunks.length, 
+          presentationTitle
+        );
+        
+        // Renumber slides to be sequential
+        chunkSlides.forEach((slide, index) => {
+          slide.id = `slide-${totalSlideCount + index + 1}`;
+        });
+        
+        allSlides.push(...chunkSlides);
+        totalSlideCount += chunkSlides.length;
+        
+        // Small delay between requests to avoid rate limits
+        if (i < chunks.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (error) {
+        console.warn(`⚠️ Skipping chunk ${i + 1} due to error:`, error);
+      }
+    }
+    
+    console.log(`🎉 Generated ${allSlides.length} total slides from ${chunks.length} chunks`);
+    
+    // Create manifest
+    const manifest = {
+      title: presentationTitle,
+      description: 'AI-generated presentation from PRD',
+      totalSlides: allSlides.length,
+      estimatedDuration: Math.ceil(allSlides.length * 2), // 2 minutes per slide
+      theme: 'dark',
+      slides: allSlides.map((slide, index) => ({
+        id: slide.id,
+        title: `Slide ${index + 1}`,
+        type: slide.metadata.type,
+        style: slide.metadata.style,
+        transition: slide.metadata.transition,
+        content_summary: 'AI-generated content'
+      }))
+    };
+    
+    return {
+      manifest,
+      htmlSlides: allSlides
     };
   }
 
